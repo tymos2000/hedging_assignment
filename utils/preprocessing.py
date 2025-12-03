@@ -3,10 +3,10 @@ import pandas as pd
 
 def load_data(file_path: str) -> pd.DataFrame:
     df = pd.read_csv(file_path)
-    df['Date'] = pd.to_datetime(df['Date'])
+    df['date'] = pd.to_datetime(df['date'])
     return df
 
-def process(data: pd.DataFrame, lifetime: int, interest_rate: pd.DataFrame) -> pd.DataFrame:
+def process_old(data: pd.DataFrame, lifetime: int, interest_rate: pd.DataFrame) -> pd.DataFrame:
     # drop missing values
     data = data.dropna()
 
@@ -41,23 +41,24 @@ def process(data: pd.DataFrame, lifetime: int, interest_rate: pd.DataFrame) -> p
     
     return data
 
+
+def process(data, r):
+    data = data.dropna()
+    data['date'] = pd.to_datetime(data['date'])
+    data['expiration_date'] = pd.to_datetime(data['expiration_date'])
+
+    # add interest rate
+    r['date'] = pd.to_datetime(r['date'])
+    r = r[['date', 'r']]
+    data = data.merge(r, on='date', how='left')
+
+    # add TTM
+    data['TTM'] = (data['expiration_date'] - data['date']).dt.days / 365.0
+
+    return data
+
 if __name__ == "__main__":
-    expiration_dates = [
-        '2023-01-20',
-        '2023-02-17',
-        '2023-03-17',
-        '2023-04-21',
-        '2023-05-19',
-        '2023-06-16',
-        '2023-07-21',
-        '2023-08-18',
-        '2023-09-15',
-        '2023-10-20',
-        '2023-11-17',
-        '2023-12-15'
-    ]
-    rates = load_data("data/raw/interest_rate_nov_2022_to_dec_2023.csv")
-    for date in expiration_dates:
-        data = load_data(f"data/raw/IBM_{date}.csv")
-        data = process(data, lifetime=45, interest_rate=rates)
-        data.to_csv(f"data/processed/IBM_{date}_processed_45.csv", index=False)
+    rates = load_data("data/raw/interest_rate.csv")
+    data = load_data("data/raw/TSLA.csv")
+    processed = process(data, rates)
+    processed.to_csv("data/processed/TSLA_processed.csv", index=False)
