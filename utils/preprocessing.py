@@ -53,15 +53,54 @@ def process_old(data: pd.DataFrame, lifetime: int, interest_rate: pd.DataFrame) 
     
     return data
 
+def validate_option_history(data, all_trading_days):
+    data = data.sort_values('date')
+    expiration = data['expiration_date'].iloc[0]
+
+    expected_start = expiration - pd.Timedelta(days=45)
+
+    actual_trading_days = pd.Index(sorted(data['date'].unique()))
+
+    expected_trading_days = all_trading_days[
+        (all_trading_days >= expected_start)
+        & (all_trading_days <= expiration)
+    ]
+
+    is_correct = actual_trading_days.equals(expected_trading_days)
+    return is_correct
+
+def classify_moneyness(delta):
+    if delta >= 0.65:
+        return 'ITM'
+    elif delta <= 0.35:
+        return 'OTM'
+    elif 0.45 <= delta <= 0.55:
+        return 'ATM'
+    else:
+        return None
+
 # processing for TSLA dataset structure
 def process(data, r):
-    data = data.dropna()
     data['date'] = pd.to_datetime(data['date'])
     data['expiration_date'] = pd.to_datetime(data['expiration_date'])
+
+    all_trading_days = pd.Index(sorted(data['date'].unique()))
 
     # add TTM and restrict to 45 days
     data = data[(data['expiration_date'] - data['date']).dt.days <= 45]
     data['TTM'] = (data['expiration_date'] - data['date']).dt.days / 365.0
+
+    
+
+    validation = (
+        data
+        .groupby('option_id')
+        .apply(lambda opt: validate_option_history(opt, all_trading_days))
+        .reset_index(name='is_valid')
+    )
+
+    valid_ids = validation.loc[validation['is_valid'], 'option_id']
+    data = data[data['option_id'].isin(valid_ids)]
 
     # add interest rate
     r['date'] = pd.to_datetime(r['date'])
@@ -92,21 +131,42 @@ def process(data, r):
         axis=1
     )
 
-    # eliminate expiration dates for which ATM/ITM/OTM has NaN IV
-    validation_table = construct_validation_table(data)
+    # eliminate rows with any NaNs beside the last day
+    mask_relevant = data['TTM'] != 0
+    invalid_options = (
+        data[mask_relevant]
+        .groupby('option_id')
+        .apply(lambda g: g.isna().any(axis=1).any())
+    )
+    invalid_ids = invalid_options[invalid_options].index
 
-    valid_expiries = validation_table[
-        (validation_table["ATM"] == 0) &
-        (validation_table["ITM"] == 0) &
-        (validation_table["OTM"] == 0)
-    ].index
+    data = data[~data['option_id'].isin(invalid_ids)]
 
-    data = data[data['expiration_date'].isin(valid_expiries)]
+    first_rows = (
+        data.sort_values('date')
+        .groupby('option_id')
+        .first()
+        .reset_index()
+    )
+    first_rows['delta_start'] = first_rows['delta']
+    first_rows['initial_moneyness'] = first_rows['delta'].apply(classify_moneyness)
+    first_rows = first_rows.dropna(subset=['initial_moneyness'])
 
+    moneyness_info = first_rows[['option_id', 'initial_moneyness', 'delta_start']]
+
+    data = data.merge(moneyness_info, on='option_id', how='inner')
+
+
+
+    print('Options left:', data['option_id'].nunique())
     return data
 
 if __name__ == "__main__":
+    ticker = 'AAPL'
     rates = load_data("data/raw/interest_rate.csv")
-    data = load_data("data/raw/IBM.csv")
+    data = load_data(f"data/raw/{ticker}.csv")
     processed = process(data, rates)
-    processed.to_csv("data/processed/IBM_processed.csv", index=False)
+    summary = data.groupby('expiration_date')['K'].unique().sort_index()
+    print('Unique expiration dates:', processed['expiration_date'].nunique())
+    print(summary)
+    processed.to_csv(f"data/processed/{ticker}_processed.csv", index=False)

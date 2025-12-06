@@ -63,9 +63,3 @@ def run_delta_hedge_analysis(data: pd.DataFrame,
     summary = pd.DataFrame(results)
     return summary
 
-def collect_errors(summary: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    for _, row in summary.iterrows():
-        df = row['errors']
-        df = df 
-
