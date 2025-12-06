@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from tools import get_delta, implied_vol
+from tools import get_delta, get_vega, implied_vol
 
 
 def load_data(file_path: str) -> pd.DataFrame:
@@ -57,7 +57,7 @@ def validate_option_history(data, all_trading_days):
     data = data.sort_values('date')
     expiration = data['expiration_date'].iloc[0]
 
-    expected_start = expiration - pd.Timedelta(days=45)
+    expected_start = expiration - pd.Timedelta(days=90)
 
     actual_trading_days = pd.Index(sorted(data['date'].unique()))
 
@@ -161,12 +161,106 @@ def process(data, r):
     print('Options left:', data['option_id'].nunique())
     return data
 
+def process_delta_vega(data, r):
+    data['date'] = pd.to_datetime(data['date'])
+    data['expiration_date'] = pd.to_datetime(data['expiration_date'])
+
+    all_trading_days = pd.Index(sorted(data['date'].unique()))
+
+    # add TTM and restrict to 45 days
+    data = data[(data['expiration_date'] - data['date']).dt.days <= 90]
+
+    data['TTM'] = (data['expiration_date'] - data['date']).dt.days / 365.0
+
+    
+
+    validation = (
+        data
+        .groupby('option_id')
+        .apply(lambda opt: validate_option_history(opt, all_trading_days))
+        .reset_index(name='is_valid')
+    )
+
+    valid_ids = validation.loc[validation['is_valid'], 'option_id']
+    data = data[data['option_id'].isin(valid_ids)]
+
+    # add interest rate
+    r['date'] = pd.to_datetime(r['date'])
+    r = r[['date', 'r']]
+    data = data.merge(r, on='date', how='left')
+
+    # add IV
+    data['IV'] = data.apply(
+        lambda row: implied_vol(
+            C = row['C'],
+            S = row['S'],
+            K = row['K'],
+            r = row['r'],
+            ttm = row['TTM']
+        ),
+        axis=1
+    )
+
+    # add delta per row
+    data['delta'] = data.apply(
+        lambda row: get_delta(
+            S = row['S'],
+            K = row['K'],
+            r = row['r'],
+            sigma = row['IV'],
+            ttm = row['TTM']
+        ),
+        axis=1
+    )
+
+    # add vega per row
+    data['vega'] = data.apply(
+        lambda row: get_vega(
+            S = row['S'],
+            K = row['K'],
+            r = row['r'],
+            sigma = row['IV'],
+            ttm = row['TTM']
+        ),
+        axis=1
+    )
+
+    # eliminate options with any NaNs beside the last day
+    mask_relevant = data['TTM'] != 0
+    invalid_options = (
+        data[mask_relevant]
+        .groupby('option_id')
+        .apply(lambda g: g.isna().any(axis=1).any())
+    )
+    invalid_ids = invalid_options[invalid_options].index
+
+    data = data[~data['option_id'].isin(invalid_ids)]
+
+    first_rows = (
+        data.sort_values('date')
+        .groupby('option_id')
+        .first()
+        .reset_index()
+    )
+    first_rows['delta_start'] = first_rows['delta']
+    first_rows['initial_moneyness'] = first_rows['delta'].apply(classify_moneyness)
+    first_rows = first_rows.dropna(subset=['initial_moneyness'])
+
+    moneyness_info = first_rows[['option_id', 'initial_moneyness', 'delta_start']]
+
+    data = data.merge(moneyness_info, on='option_id', how='inner')
+
+
+
+    print('Options left:', data['option_id'].nunique())
+    return data
+
 if __name__ == "__main__":
     ticker = 'AAPL'
     rates = load_data("data/raw/interest_rate.csv")
     data = load_data(f"data/raw/{ticker}.csv")
-    processed = process(data, rates)
+    processed = process_delta_vega(data, rates)
     summary = data.groupby('expiration_date')['K'].unique().sort_index()
     print('Unique expiration dates:', processed['expiration_date'].nunique())
     print(summary)
-    processed.to_csv(f"data/processed/{ticker}_processed.csv", index=False)
+    processed.to_csv(f"data/processed/{ticker}_processed_vega.csv", index=False)
