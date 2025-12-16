@@ -12,7 +12,7 @@ def delta_hedge(data: pd.DataFrame, hedge_frequency: int = 1) -> Dict[str, Any]:
     N = len(data)
 
     delta = data.loc[0, 'delta']
-
+    C0 = data.loc[0, 'C']
     errors = []
 
     for i in range(1, N):
@@ -36,7 +36,7 @@ def delta_hedge(data: pd.DataFrame, hedge_frequency: int = 1) -> Dict[str, Any]:
         'initial_moneyness' : data['initial_moneyness'].iloc[0],
         'hedge_frequency' : hedge_frequency,
         'errors' : error_df,
-        'mse' : np.mean(error_df['error']**2),
+        'mse' : np.mean((error_df['error']/C0)**2),
         'mean_error' : np.mean(error_df['error']),
         'std_error' : np.std(error_df['error'])
     }
@@ -88,7 +88,7 @@ def delta_vega_hedge(target_data: pd.DataFrame,
     delta_rep = rep_data.loc[0, 'delta']
     vega_target = target_data.loc[0, 'vega']
     vega_rep = rep_data.loc[0, 'vega']
-
+    C0 = target_data.loc[0, 'C']
     if vega_rep == 0:
         return None
 
@@ -129,7 +129,7 @@ def delta_vega_hedge(target_data: pd.DataFrame,
         'initial_moneyness' : target_data['initial_moneyness'].iloc[0],
         'hedge_frequency' : hedge_frequency,
         'errors' : error_df,
-        'mse' : np.mean(error_df['error']**2),
+        'mse' : np.mean((error_df['error']/C0)**2),
         'mean_error' : np.mean(error_df['error']),
         'std_error' : np.std(error_df['error'])
     }
