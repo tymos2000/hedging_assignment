@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 
 ticker = 'AAPL'
-data = pd.read_csv(f"/Users/snoopy/Desktop/Project/Pulled/hedging_assignment/data/processed/AAPL_processed_vega.csv")
+data = pd.read_csv(f"AAPL_processed_vega.csv")
 
 # ---- 1) Per-option table with one row per option_id ----
 per_option = (
